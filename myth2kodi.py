@@ -15,7 +15,8 @@ Description:
 ---------------------------
 """
 
-# Needs to check if a recording has been deleted and if so, don't process it
+# If adding a single episode, not efficient to loop through recordings until we find it. Is there a better way?
+# To we need to download a whole zip from TTVDb to get only a title?
 
 import httplib
 
@@ -88,13 +89,7 @@ parser.add_argument('--import-recording-list', dest='import_recording_list', act
                     help='Import recording list in xml format. Specify full path to xml file.')
 parser.add_argument('--log-debug', dest='log_debug', action='store_true', default=False,
                     help='Write debug messages to the log file. Default logging level is INFO.')
-parser.add_argument('--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
-                    help='Refresh nfo files. Can be combined with --add to refresh specific nfo file.')
 
-# TODO: handle arguments refresh nfos
-# TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
-# parser.add_argument('-r', '--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
-# help='refresh all nfo files')
 # parser.add_argument('-c', '--clean', dest='clean', action='store_true', default=False,
 # help='remove all references to deleted MythTV recordings')
 # parser.add_argument('--rebuild-library', dest='rebuild_library', action='store_true', default=False,
@@ -156,16 +151,6 @@ def write_comskip(base_link_file, mark_dict):
     f.write(c)
     f.close()
 
-
-def series_nfo_exists(directory):
-    """
-    check if series nfo file tvshow.nfo exists
-    :param directory: directory to check for nfo file
-    :return: True exists, or False does not exist
-    """
-    return os.path.exists(os.path.join(directory, 'tvshow.nfo'))
-
-
 def check_recordings_dirs():
     """
     checks mythtv recording directories listed in config.py under myth_recording_dir
@@ -173,7 +158,6 @@ def check_recordings_dirs():
     for myth_recording_dir in config.mythtv_recording_dirs[:]:
         if os.path.exists(myth_recording_dir) is not True:
             print myth_recording_dir + " is not a valid path. Aborting"
-
 
 def get_base_filename_from(path):
     """
@@ -183,7 +167,6 @@ def get_base_filename_from(path):
     """
     return os.path.splitext(os.path.basename(path))[0]
 
-
 def get_series_id(inetref):
     """
     regex just the id # from a ttvdb or tmdb internet reference
@@ -191,7 +174,6 @@ def get_series_id(inetref):
     :return: series id #
     """
     return re.findall('[\d]+$', inetref)[0]
-
 
 def download_file(file_url, target_file='', return_response=False):
     global log
@@ -410,8 +392,6 @@ def read_recordings():
     episode_new_lib = []
     special_count = 0
     special_new_lib = []
-    image_error_list = []
-    updated_nfos_lib = []
 
     recording_list = get_recording_list()
 
@@ -438,11 +418,13 @@ def read_recordings():
         program_id = unicode(recording.find('ProgramId').text)
         recording_group = unicode(recording.find('Recording/RecGroup').text)
         file_name = recording.find('FileName').text
+        base_file_name = get_base_filename_from(file_name)
 
-        #if subtitle is None or subtitle == 'None':
-        #    subtitle = 'Generic Episode'
-
-        # print mythtv_title + subtitle + inetref
+        # check if we're adding a new file by comparing the current file name to the argument file name
+        if args.add is not None:
+            if not base_file_name == get_base_filename_from(args.add):
+                continue
+            log.info('Adding new file with "--add {}"'.format(args.add))
 
         # Skip deleted recordings
         if recording_group == 'Deleted':
@@ -459,8 +441,6 @@ def read_recordings():
             log.warning('Inetref was not found, cannot process: ' + mythtv_title + subtitle)
             continue
 
-        base_file_name = get_base_filename_from(file_name)
-
         file_extension = file_name[-4:]
         log.info('PROCESSING PROGRAM:')
         log.info('Title: ' + mythtv_title + ' - ' + subtitle)
@@ -474,12 +454,6 @@ def read_recordings():
 
         if ttvdb_title != mythtv_title:
             log.info('Changing title: ' + mythtv_title + ' ==> ' + ttvdb_title)
-
-        # check if we're adding a new file by comparing the current file name to the argument file name
-        if args.add is not None:
-            if not base_file_name == get_base_filename_from(args.add):
-                continue
-            log.info('Adding new file with "--add {}"'.format(args.add))
 
         # print recording info if --print_match_filename arg is given
         if args.print_match_filename is not None:
@@ -516,10 +490,6 @@ def read_recordings():
             special_count += 1
         else:
             episode_count += 1
-
-        # parse show name for file system safe name
-        #title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
-        #title_safe = re.sub(' +', ' ', title_safe)
 
         # form the file name
         episode_name = ttvdb_title + " - S" + season + "E" + episode + " - " + subtitle
@@ -565,28 +535,17 @@ def read_recordings():
                 special_new_lib.append(link_file)
             continue
 
-        #series_title = get_title_from_ttvdb(inetref)
-
-        #title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', series_title)
-        #title_safe = re.sub(' +', ' ', title_safe)
-
         target_link_dir = os.path.join(config.destination_dir, ttvdb_title)
 
-        #if not os.path.exists(target_link_dir) or (os.path.exists(target_link_dir) and not (os.path.exists(os.path.join(target_link_dir, 'tvshow.nfo')))):
         if not os.path.exists(target_link_dir):
             os.makedirs(target_link_dir)
 
-                #result = new_series_from_ttvdb(title, ttvdb_title, inetref, category, target_link_dir)
-                #print "RESULT: " + result
-
-
-        #target_link_dir = os.path.join(config.destination_dir, ttvdb_title)
         episode_name = ttvdb_title + " - S" + season + "E" + episode + " - " + subtitle
         link_file = os.path.join(target_link_dir, episode_name) + file_extension
 
         # create link
         # print "Linking " + source_file + " ==> " + link_file
-        if args.show_status is False and args.import_recording_list is None and args.refresh_nfos is False:
+        if args.show_status is False and args.import_recording_list is None:
             if not os.path.exists(link_file) or not os.path.islink(link_file):
                 log.info('Linking ' + source_file + ' ==> ' + link_file)
                 #if config.target_type == "symlink":
@@ -606,10 +565,6 @@ def read_recordings():
                 # episode_new_count += 1
                 episode_new_lib.append(link_file)
 
-        # count number of updated nfo files
-        if args.refresh_nfos is True:
-            updated_nfos_lib.append(source_file)
-
         # if adding a new recording with --add, comskip it, and then stop looking
         if args.add is not None and args.show_status is False:
             if args.comskip_off is False:
@@ -617,7 +572,7 @@ def read_recordings():
                 comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
             break
 
-    if args.add is None and args.show_status is True and args.refresh_nfos is False:
+    if args.add is None and args.show_status is True:
         print '   --------------------------------'
         print '   |         |  Series:   ' + str(len(series_lib))
         print '   |  Total  |  Episodes: ' + str(episode_count)
@@ -626,12 +581,6 @@ def read_recordings():
         print '   |         |  Series:   ' + str(len(series_new_lib))
         print '   |   New   |  Episodes: ' + str(len(episode_new_lib))
         print '   |         |  Specials: ' + str(len(special_new_lib))
-        print '   --------------------------------'
-        print '   |  Image processing errors: ' + str(len(image_error_list))
-        print '   --------------------------------'
-    elif args.refresh_nfos is True:
-        print '   --------------------------------'
-        print '   |  Updated nfos: ' + str(len(updated_nfos_lib))
         print '   --------------------------------'
 
     if args.show_status is True:
@@ -664,26 +613,13 @@ def read_recordings():
             print ''
             print '   No new recordings were found.'
 
-    elif len(image_error_list) > 0:
-        print ''
-        print ''
-        print 'Warning: One or more banner, fanart, or poster images could not be created for these recordings:'
-        print '-----------------------------------------------------------------------------------------------'
-        for lf in image_error_list:
-            print lf
-    print ''
-
-    encountered_image_error = (len(image_error_list) > 0)
     encountered_other_error = ('ERROR' in log_content)
-    if encountered_image_error is True:
-        print 'Encountered error processing poster, banner, or fanart image for new series.'
-    elif encountered_other_error is True:
+    if encountered_other_error is True:
         print 'Encountered an error. Check log.'
 
-    if encountered_image_error is True or encountered_other_error is True:
+    if encountered_other_error is True:
         return False
     else:
-        # print 'Done! Completed successfully.'
         return True
 
 
@@ -697,7 +633,7 @@ def main():
         comskip_all()
     elif args.comskip_status is True:
         comskip_status()
-    elif args.add_all is True or args.show_status is True or args.add_match_title is not None or args.add is not None or args.print_match_filename is not None or args.refresh_nfos is True or args.comskip is not None:
+    elif args.add_all is True or args.show_status is True or args.add_match_title is not None or args.add is not None or args.print_match_filename is not None or args.comskip is not None:
         success = read_recordings()
         if success is False:
             raise Exception('read_recordings() returned false')
