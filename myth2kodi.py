@@ -31,7 +31,6 @@ from PIL import Image
 import cStringIO
 import json
 import sys
-import MySQLdb
 import subprocess
 import config
 import logging
@@ -42,7 +41,6 @@ sys.setdefaultencoding('utf-8')
 
 BASE_URL = "http://" + config.hostname + ":" + config.host_port
 THIS_DIR = os.getcwd()
-db = None
 log_content = ''
 log = None
 
@@ -131,26 +129,6 @@ def initialize_logging():
 
     log.debug('Logging initialized')
     log.info('')
-
-
-def get_db_cursor():
-    global db
-    if db is None:
-        db = MySQLdb.connect(host=config.db_host,
-                             user=config.db_user,
-                             passwd=config.db_passwd,
-                             db=config.db_name,
-                             charset='utf8',
-                             use_unicode=True)
-    return db.cursor()
-
-
-def close_db():
-    global db
-    if db is not None:
-        db.cursor().close()
-        db.close()
-
 
 def log_missing_inet_ref(title):
     return
@@ -302,9 +280,6 @@ def print_config():
     print '    ttvdb_key:           ' + unicode(config.ttvdb_key)
     print '    ttvdb_zips_dir:      ' + unicode(config.ttvdb_zips_dir)
     print '    tmdb_key:            ' + unicode(config.tmdb_key)
-    print '    db_user:             ' + unicode(config.db_user)
-    print '    db_passwd:           ' + unicode(config.db_passwd)
-    print '    db_name:             ' + unicode(config.db_name)
     print ''
 
 
@@ -530,7 +505,7 @@ def read_recordings():
         log.info('PROCESSING PROGRAM:')
         log.info('Title: ' + ttvdb_title + subtitle)
         log.info('Filename: ' + base_file_name + file_extension)
-        log.info('Program ID: ' + program_id)
+        log.info('Inetref: ' + inetref)
 
         # if it's a special...
         if season.zfill(2) == "00" and episode == "00":
@@ -730,7 +705,6 @@ def main():
             raise Exception('read_recordings() returned false')
         else:
             log.info('DONE! Completed successfully!')
-            close_db()
             sys.exit(0)
     sys.exit(0)
 
@@ -741,7 +715,6 @@ if __name__ == '__main__':
    #e = sys.exc_info()[0]
    #print( "<p>Error: %s</p>" % e )
 #except Exception, e:
-    #close_db()
     #print('Line number: ' + str(sys.exc_traceback.tb_lineno))
     #print('Exception message: ' + str(e))
     #print('Traceback: ' + sys.exc_info()[0])
