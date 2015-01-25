@@ -128,7 +128,6 @@ def initialize_logging():
         log.setLevel(logging.INFO)
 
     log.debug('Logging initialized')
-    log.info('')
 
 def log_missing_inet_ref(title):
     return
@@ -239,26 +238,21 @@ def get_title_from_ttvdb(inetref):
     series_zip_file = os.path.join(config.ttvdb_zips_dir, series_id + '.zip')
     if not os.path.exists(series_zip_file):
         # zip does not exist, download it
-        # print '    downloading ttvdb zip file...'
-        log.info('TTVDB zip does not exist, downloading ttvdb zip file to: ' + series_zip_file)
+        log.debug('TTVDB zip does not exist, downloading ttvdb zip file to: ' + series_zip_file)
         ttvdb_zip_file = ttvdb_base_url + 'api/' + config.ttvdb_key + '/series/' + series_id + '/all/en.zip'
         download_file(ttvdb_zip_file, series_zip_file)
-        # urllib.urlretrieve(ttvdb_zip_file, series_zip_file)
 
-    # extract poster, banner, and fanart urls
-    # print '    ttvdb zip exists, reading xml contents...'
-    log.info('ttvdb zip exists, reading xml contents...')
+    log.debug('ttvdb zip exists, reading xml contents...')
     z = zipfile.ZipFile(series_zip_file, 'r')
     for name in z.namelist():
         if name == 'en.xml':
             z.extract(name, '/tmp/')
             break
     if not os.path.exists('/tmp/en.xml'):
-        print '    en.xml not found in series zip file at /tmp/en.xml'
         log.error('en.xml not found in series zip file at /tmp/en.xml')
         return False
     else:
-        log.info('Reading en.xml...')
+        log.debug('Reading en.xml...')
         tree = ET.parse('/tmp/en.xml')
         series_data = tree.getroot()
         series = series_data.find('Series')
@@ -410,7 +404,6 @@ def read_recordings():
 
     """
     global log
-    print ''
     series_lib = []
     series_new_lib = []
     episode_count = 0
@@ -451,28 +444,42 @@ def read_recordings():
 
         # print mythtv_title + subtitle + inetref
 
+        # Skip deleted recordings
+        if recording_group == 'Deleted':
+            log.info('Ignoring deleted recording: ' + mythtv_title + ' - ' + subtitle)
+            continue
+
+        # Skip LiveTV recordings
+        if recording_group == 'LiveTV':
+            log.info('Ignoring LiveTV recording: ' + mythtv_title + ' - ' + subtitle)
+            continue
+
         # be sure we have an inetref
         if inetref is None or inetref == '' or inetref == 'None':
             log.warning('Inetref was not found, cannot process: ' + mythtv_title + subtitle)
             continue
+
+        base_file_name = get_base_filename_from(file_name)
+
+        file_extension = file_name[-4:]
+        log.info('PROCESSING PROGRAM:')
+        log.info('Title: ' + mythtv_title + ' - ' + subtitle)
+        log.info('Filename: ' + base_file_name + file_extension)
+        log.info('Inetref: ' + inetref)
 
         # Use the TVDB title from here on in
         ttvdb_title = get_title_from_ttvdb(inetref)
         #ttvdb_title = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', ttvdb_title)
         #ttvdb_title = re.sub(' +', ' ', ttvdb_title)
 
-        # Skip deleted recordings
-        if recording_group == 'Deleted':
-            log.info('Ignoring deleted recording: ' + ttvdb_title + ' - ' + subtitle)
-            continue
+        if ttvdb_title != mythtv_title:
+            log.info('Changing title: ' + mythtv_title + ' ==> ' + ttvdb_title)
 
         # check if we're adding a new file by comparing the current file name to the argument file name
-        base_file_name = get_base_filename_from(file_name)
         if args.add is not None:
             if not base_file_name == get_base_filename_from(args.add):
                 continue
             log.info('Adding new file with "--add {}"'.format(args.add))
-            print 'ADDING NEW RECORDING: ' + args.add
 
         # print recording info if --print_match_filename arg is given
         if args.print_match_filename is not None:
@@ -500,12 +507,6 @@ def read_recordings():
                 print('PROGRAM ID MATCH: ' + program_id)
                 print('title: ' + ttvdb_title)
                 print('plot: ' + plot)
-
-        file_extension = file_name[-4:]
-        log.info('PROCESSING PROGRAM:')
-        log.info('Title: ' + ttvdb_title + subtitle)
-        log.info('Filename: ' + base_file_name + file_extension)
-        log.info('Inetref: ' + inetref)
 
         # if it's a special...
         if season.zfill(2) == "00" and episode == "00":
@@ -540,7 +541,6 @@ def read_recordings():
 
         # skip if link already exists
         if os.path.exists(link_file) or os.path.islink(link_file):
-            print 'Link already exists: ' + link_file
             log.info('Link already exists: ' + link_file)
             continue
 
@@ -556,7 +556,6 @@ def read_recordings():
 
             if source_dir is None:
                 # could not find file!
-                # print ("Cannot create link for " + episode_name + ", no valid source directory.  Skipping.")
                 log.error('Cannot create link for ' + episode_name + ', no valid source directory.  Skipping.')
                 continue
 
@@ -590,10 +589,10 @@ def read_recordings():
         if args.show_status is False and args.import_recording_list is None and args.refresh_nfos is False:
             if not os.path.exists(link_file) or not os.path.islink(link_file):
                 log.info('Linking ' + source_file + ' ==> ' + link_file)
-                if config.target_type == "symlink":
-                    os.symlink(source_file, link_file)
-                elif config.target_type == "hardlink":
-                    os.link(source_file, link_file)
+                #if config.target_type == "symlink":
+                    #os.symlink(source_file, link_file)
+                #elif config.target_type == "hardlink":
+                    #os.link(source_file, link_file)
         # commercial skipping didn't work reliably using frames markers from the mythtv database as of .27
         # keep the code here anyway for later reference
         # write_comskip(path, mark_dict)
@@ -685,7 +684,6 @@ def read_recordings():
         return False
     else:
         # print 'Done! Completed successfully.'
-        print ''
         return True
 
 
