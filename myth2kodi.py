@@ -15,10 +15,11 @@ Description:
 ---------------------------
 """
 
+# Needs to check if a recording has been deleted and if so, don't process it
+
 import httplib
 
 import os
-import shutil
 import xml.etree.cElementTree as ET
 from lxml import etree as ET2
 import xml.dom.minidom as dom
@@ -91,8 +92,6 @@ parser.add_argument('--log-debug', dest='log_debug', action='store_true', defaul
                     help='Write debug messages to the log file. Default logging level is INFO.')
 parser.add_argument('--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
                     help='Refresh nfo files. Can be combined with --add to refresh specific nfo file.')
-parser.add_argument('--clean', dest='clean', action='store_true', default=False,
-                    help='Perform cleanup operations on destination directory.')
 
 # TODO: handle arguments refresh nfos
 # TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
@@ -102,7 +101,6 @@ parser.add_argument('--clean', dest='clean', action='store_true', default=False,
 # help='remove all references to deleted MythTV recordings')
 # parser.add_argument('--rebuild-library', dest='rebuild_library', action='store_true', default=False,
 # help='rebuild library from existing links')
-
 
 if len(sys.argv) == 1:
     parser.error('At lease one argument is required. Use -h or --help for details.')
@@ -167,90 +165,6 @@ def prettify(xml_element):
     rough_string = ET.tostring(xml_element, 'utf-8')
     reparsed = dom.parseString(rough_string)
     return reparsed.toprettyxml(indent="\t")
-
-
-def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added):
-    """
-    write nfo file for series
-    :param directory:
-    :param title:
-    :param rating:
-    :param votes:
-    :param plot:
-    :param id:
-    :param genre_list:
-    :param premiered:
-    :param studio:
-    :param date_added:
-    :return:
-    """
-    global log
-    log.info('Writing series nfo file...')
-    root = ET2.Element('tvshow')
-    title_element = ET2.SubElement(root, 'title')
-    title_element.text = title
-    title_element = ET2.SubElement(root, 'rating')
-    title_element.text = rating
-    title_element = ET2.SubElement(root, 'votes')
-    title_element.text = votes
-    title_element = ET2.SubElement(root, 'plot')
-    title_element.text = plot
-    title_element = ET2.SubElement(root, 'id')
-    title_element.text = id
-
-    # add genres
-    if genre_list is not None and '|' in genre_list:
-        genre_list = genre_list.strip('|').split('|')
-        # print 'genre_list: ' + genre_list
-        for genre in genre_list:
-            # print 'genre: ' + genre
-            title_element = ET2.SubElement(root, 'genre')
-            title_element.text = genre
-    else:
-        title_element = ET2.SubElement(root, 'genre')
-        title_element.text = genre_list
-
-    title_element = ET2.SubElement(root, 'premiered')
-    title_element.text = premiered
-    title_element = ET2.SubElement(root, 'studio')
-    title_element.text = studio
-    title_element = ET2.SubElement(root, 'dateadded')
-    title_element.text = date_added
-    tree = ET2.ElementTree(root)
-    tree.write(os.path.join(directory, 'tvshow.nfo'), pretty_print=True, encoding='UTF-8', xml_declaration=True)
-    log.info('Done writing series nfo file.')
-    return
-
-
-def write_episode_nfo(title, season, episode, plot, airdate, playcount, nfo_file):
-    """
-    write nfo file for episode
-    :param title:
-    :param season:
-    :param episode:
-    :param plot:
-    :param airdate:
-    :param nfo_file:
-    :return:
-    """
-    log.info('Writing episode info for: ' + nfo_file)
-    root = ET2.Element('episodedetails')
-    title_element = ET2.SubElement(root, 'title')
-    title_element.text = title
-    season_element = ET2.SubElement(root, 'season')
-    season_element.text = season
-    episode_element = ET2.SubElement(root, 'episode')
-    episode_element.text = episode
-    plot_element = ET2.SubElement(root, 'plot')
-    plot_element.text = plot
-    airdate_element = ET2.SubElement(root, 'aired')
-    airdate_element.text = airdate
-    playcount_element = ET2.SubElement(root, 'playcount')
-    playcount_element.text = playcount
-    tree = ET2.ElementTree(root)
-    tree.write(nfo_file, pretty_print=True, encoding='UTF-8', xml_declaration=True)
-    return
-
 
 def write_comskip(base_link_file, mark_dict):
     if not len(mark_dict):
@@ -334,22 +248,17 @@ def download_file(file_url, target_file='', return_response=False):
     else:
         return True
 
-
-def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
+def get_title_from_ttvdb(inetref):
     # store series zip from thetvdb.com
     """
     create a new show from a ttvdb id
-    :param title:
-    :param title_safe:
     :param inetref:
-    :param category:
-    :param directory:
-    :return: True: success, False: error
+    :return: The TTVDb series name.
     """
     global log
     ttvdb_base_url = 'http://www.thetvdb.com/'
     series_id = get_series_id(inetref)
-    series_zip_file = os.path.join(config.ttvdb_zips_dir, title_safe + '_' + series_id + '.zip')
+    series_zip_file = os.path.join(config.ttvdb_zips_dir, series_id + '.zip')
     if not os.path.exists(series_zip_file):
         # zip does not exist, download it
         # print '    downloading ttvdb zip file...'
@@ -379,180 +288,9 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
             log.error('Could not find the "Series" section in en.xml.')
             return False
 
-        rating = series.find('Rating').text
-        votes = series.find('RatingCount').text
-        plot = series.find('Overview').text
-        id = series.find('id').text
-        premiered = series.find('FirstAired').text
-        studio = series.find('Network').text
-        date_added = series.find('added').text
+        title = series.find('SeriesName').text
 
-        # assemble genre string
-        genre_list = series.find('Genre').text
-        if genre_list is not None and '|' in genre_list:
-            genre_list = genre_list.strip('|')
-            if category not in genre_list:
-                genre_list += '|' + category
-            genre_list = genre_list.strip('|')
-
-        # print 'genre_list: ' + genre_list
-
-        write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added)
-
-        # copy poster, banner, and fanart to link dir
-        log.info('Retrieving poster, fanart, and banner...')
-        ttvdb_banners_url = ttvdb_base_url + 'banners/'
-        poster_text = series.find('poster').text
-        banner_text = series.find('banner').text
-        fanart_text = series.find('fanart').text
-        if poster_text is None:
-            log.warning('Poster image info could not be retrieved')
-        else:
-            log.info('Downloading poster...')
-            poster_url = ttvdb_banners_url + series.find('poster').text
-            if not download_file(poster_url, os.path.join(directory, 'poster.jpg')):
-                return False
-
-        if banner_text is None:
-            log.warning('Banner image info could not be retrieved')
-        else:
-            log.info('Downloading banner...')
-            banner_url = ttvdb_banners_url + series.find('banner').text
-            if not download_file(banner_url, os.path.join(directory, 'banner.jpg')):
-                return False
-
-        if fanart_text is None:
-            log.warning('Fanart image info could not be retrieved')
-        else:
-            log.info('Downloading fanart...')
-            fanart_url = ttvdb_banners_url + series.find('fanart').text
-            if not download_file(fanart_url, os.path.join(directory, 'fanart.jpg')):
-                return False
-
-        if poster_text is None and banner_text is None and fanart_text is None:
-            return False
-
-        return True
-
-
-def new_series_from_tmdb(title, inetref, category, directory):
-    """
-    create a new show from a tmdb id
-    :param title:
-    :param inetref:
-    :param category:
-    :param directory:
-    :return: True: success, False: error
-    """
-    global log
-    api_url = 'http://api.themoviedb.org/3'
-    headers = {'Accept': 'application/json'}
-
-    request = urllib2.Request('{url}/configuration?api_key={key}'.format(url=api_url, key=config.tmdb_key),
-                              headers=headers)
-    cr = json.loads(urllib2.urlopen(request).read())
-
-    # base url
-    base_url = cr['images']['base_url']
-    poster_sizes = cr['images']['poster_sizes']
-    backdrop_sizes = cr['images']['backdrop_sizes']
-    """
-        'sizes' should be sorted in ascending order, so
-            max_size = sizes[-1]
-        should get the largest size as well.
-    """
-
-    def size_str_to_int(x):
-        return float("inf") if x == 'original' else int(x[1:])
-
-    # max_size
-    max_poster_size = str(max(poster_sizes, key=size_str_to_int))
-    max_backdrop_size = str(max(backdrop_sizes, key=size_str_to_int))
-
-    series_id = get_series_id(inetref)
-    request = urllib2.Request('{url}/movie/{id}?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
-    mr = json.loads(urllib2.urlopen(request).read())
-
-    # #### POSTER #####
-    log.info('Getting path to poster...')
-    poster_path = mr['poster_path']
-    poster_url = '{0}{1}{2}'.format(base_url, max_poster_size, poster_path)
-    if poster_path is None:
-        return False
-    poster_target = os.path.join(directory, 'poster.jpg')
-    log.info('Downloading poster...')
-    if download_file(poster_url, poster_target) is False:
-        return False
-
-    # #### FANART #####
-    log.info('Getting path to fanart...')
-    backdrop_path = mr['backdrop_path']
-    backdrop_url = '{0}{1}{2}'.format(base_url, max_backdrop_size, backdrop_path)
-    if backdrop_path is None:
-        return False
-    backdrop_target = os.path.join(directory, 'fanart.jpg')
-    log.info('Downloading fanart...')
-    if download_file(backdrop_url, backdrop_target) is False:
-        return False
-
-    # print '    poster_path: ' + poster_path
-    # print '    backdrop_path: ' + backdrop_path
-
-    # request = Request('{url}/movie/{id}/images?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
-    # ir = json.loads(urlopen(request).read())
-
-    # #### BANNER #####
-    # make a 758 x 140 banner from poster
-    log.info('Making 758 x 140 banner image from poster...')
-    response = download_file(poster_url, '', True)
-    if response is None or response is False:
-        return False
-    img = Image.open(cStringIO.StringIO(response.read()))
-    # print 'w: ' + img.size[0] + ' h: ' + img.size[1]
-    banner_ratio = 758 / float(140)
-    # shift crop down by 200 pixels
-    box = (0, 220, img.size[0], int(round((img.size[0] / banner_ratio))) + 220)
-    img = img.crop(box).resize((758, 140), Image.ANTIALIAS)
-    banner_file = os.path.join(directory, 'banner.jpg')
-    log.info('Saving banner image file to ' + banner_file)
-    img.save(banner_file)
-
-    # print mr
-    # print mr['title']
-    # print mr['runtime']
-
-    rating = unicode(mr['vote_average'])
-    votes = unicode(mr['vote_count'])
-    plot = unicode(mr['overview'])
-    id = unicode(mr['id'])
-    premiered = unicode(mr['release_date'])
-    studio = ''
-    date_added = ''
-
-    # assemble genre string
-    # print mr['genres']
-    genres = mr['genres']
-    if genres is not None:
-        genre_list = ''
-        for genre in genres:
-            name = genre['name']
-            if name is not None:
-                if not name.lower() == category.lower():
-                    genre_list += name + '|'
-        if category is not None:
-            genre_list += category
-        genre_list = genre_list.strip('|')
-
-    # print 'rating: ' + rating
-    # print 'votes: ' + votes
-    # print 'plot: ' + plot
-    # print 'id: ' + id
-    # print 'premiered: ' + premiered
-    # print 'genre_list: ' + genre_list
-
-    write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added)
-    return True
-
+        return title
 
 def print_config():
     print ''
@@ -691,35 +429,13 @@ def write_recording_list(recording_list):
     f.close()
     log.info('Done writing recording list.')
 
-
-def clean():
-    # rename specials, removing any airdate in the filename that is no longer needed
-    cleaned_file = os.path.join(get_script_path(), 'cleaned')
-    cleaned_file_exists = os.path.exists(cleaned_file)
-    if args.clean is True or not cleaned_file_exists:
-        if args.clean is True:
-            log.info('Cleaning destination directory per argument --clean')
-        else:
-            log.info('cleaned file was not found, will now perform a cleaning operation on the destination directory...')
-        for root, dirs, files in os.walk(config.destination_dir):
-            for file in files:
-                # print os.path.join(root, file)
-                result = re.sub(r'(.*) - [\d]{4}-[\d]{2}-[\d]{2}(.*)', r'\1\2', file)
-                os.rename(os.path.join(root, file), os.path.join(root, result))
-        log.info('Cleaning complete.')
-        if not os.path.exists(cleaned_file):
-            open(cleaned_file, 'w').close()
-            log.info('cleaned file was written to script directory.')
-    elif cleaned_file_exists:
-            log.info('cleaned file found, clean operation was skipped.')
-
-
 def read_recordings():
     """
     read MythTV recordings
 
     """
     global log
+    print ''
     series_lib = []
     series_new_lib = []
     episode_count = 0
@@ -729,10 +445,9 @@ def read_recordings():
     image_error_list = []
     updated_nfos_lib = []
 
-    # make sure all files in the destination directory are in the right format
-    clean()
-
     recording_list = get_recording_list()
+
+    #print prettify(recording_list)
 
     if args.export_recording_list is True:
         write_recording_list(recording_list)
@@ -741,8 +456,42 @@ def read_recordings():
     for recording in recording_list.iter('Program'):
         is_special = False
 
-        # check if we're adding a new file by comparing the current file name to the argument file name
+        #print prettify(recording)
+   
+        # collect program attributes
+        mythtv_title = unicode(recording.find('Title').text)
+        subtitle = unicode(recording.find('SubTitle').text)
+        season = unicode(recording.find('Season').text)
+        episode = unicode(recording.find('Episode').text.zfill(2))
+        air_date = unicode(recording.find('Airdate').text)
+        plot = unicode(recording.find('Description').text)
+        category = unicode(recording.find('Category').text)
+        inetref = unicode(recording.find('Inetref').text)
+        program_id = unicode(recording.find('ProgramId').text)
+        recording_group = unicode(recording.find('Recording/RecGroup').text)
         file_name = recording.find('FileName').text
+
+        #if subtitle is None or subtitle == 'None':
+        #    subtitle = 'Generic Episode'
+
+        # print mythtv_title + subtitle + inetref
+
+        # be sure we have an inetref
+        if inetref is None or inetref == '' or inetref == 'None':
+            log.warning('Inetref was not found, cannot process: ' + mythtv_title + subtitle)
+            continue
+
+        # Use the TVDB title from here on in
+        ttvdb_title = get_title_from_ttvdb(inetref)
+        #ttvdb_title = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', ttvdb_title)
+        #ttvdb_title = re.sub(' +', ' ', ttvdb_title)
+
+        # Skip deleted recordings
+        if recording_group == 'Deleted':
+            log.info('Ignoring deleted recording: ' + ttvdb_title + ' - ' + subtitle)
+            continue
+
+        # check if we're adding a new file by comparing the current file name to the argument file name
         base_file_name = get_base_filename_from(file_name)
         if args.add is not None:
             if not base_file_name == get_base_filename_from(args.add):
@@ -758,38 +507,15 @@ def read_recordings():
             else:
                 continue
 
-        title = unicode(recording.find('Title').text)
         # check if we are matching on a title
         if args_add_match_title is not None:
-            if args_add_match_title not in title:
+            if args_add_match_title not in ttvdb_title:
                 continue
 
-        if args.print_match_title is not None and args.print_match_title in title:
+        # print recording info if argument give is in title
+        if args.print_match_title is not None and args.print_match_title in ttvdb_title:
             print prettify(recording)
             continue
-
-        # collect program attributes
-        season = unicode(recording.find('Season').text)
-        episode = unicode(recording.find('Episode').text.zfill(2))
-        air_date = unicode(recording.find('Airdate').text)
-        plot = unicode(recording.find('Description').text)
-        category = unicode(recording.find('Category').text)
-        # record_date = re.findall('\d*-\d*-\d*', unicode(recording.find('StartTime').text))[0]
-        inetref = unicode(recording.find('Inetref').text)
-        program_id = unicode(recording.find('ProgramId').text)
-        # chan_id = recording.find('Channel/ChanId').text
-        # start_time = unicode(recording.find('StartTime').text).replace('T', ' ').replace('Z', '')
-
-        # log.info('PROCESSING RECORDING')
-        # log.info('  title: ' + title)
-        # log.info('  season: ' + season)
-        # log.info('  episode: ' + episode)
-        # log.info('  air_date: ' + air_date)
-        # log.info('  plot: ' + plot)
-        # log.info('  inetref: ' + inetref)
-        # log.info('  category: ' + category)
-        # log.info('  record_date: ' + record_date)
-        # log.info('  program_id: ' + program_id)
 
         # check if we are matching on a program id
         if args.add_match_programid is not None:
@@ -797,70 +523,15 @@ def read_recordings():
                 continue
             else:
                 print('PROGRAM ID MATCH: ' + program_id)
-                print('title: ' + title)
+                print('title: ' + ttvdb_title)
                 print('plot: ' + plot)
 
         file_extension = file_name[-4:]
         log.info('PROCESSING PROGRAM:')
-        log.info('Title: ' + title)
+        log.info('Title: ' + ttvdb_title + subtitle)
         log.info('Filename: ' + base_file_name + file_extension)
         log.info('Program ID: ' + program_id)
 
-        # be sure we have an inetref
-        if inetref is None or inetref == '':
-            log.warning('Inetref was not found, cannot process: ' + title)
-            continue
-
-        # lookup watched flag from db
-        # (skip this if we are reading from an xml file)
-        playcount = None
-        if args.import_recording_list is None:
-            if program_id is not None and not program_id == '':
-                try:
-                    log.info('Looking up watched flag from db')
-                    cursor = get_db_cursor()
-                    sql = 'select watched from recorded where programid = "{}";'.format(program_id)
-                    cursor.execute(sql)
-                    results = cursor.fetchone()
-                    if results is not None:
-                        playcount = unicode(results[0])
-
-                        # # lookup commercial markers (not used, replaced with comskip)
-                        # log.info('Looking up commercial markers')
-                        # mark_list = []
-                        # mark_types = ( '4', '5')
-                        # for mark_type in mark_types:
-                        # sql = 'select mark from recordedmarkup where starttime = "{}" and chanid = "{}" and type = "{}"'.format(
-                        # start_time, chan_id, mark_type)
-                        # cursor.execute(sql)
-                        # results = cursor.fetchall()
-                        # l = []
-                        # for result in results:
-                        # l.append(result[0])
-                        # mark_list.append(l)
-                        #
-                        # mark_dict = dict(zip(mark_list[0], mark_list[1]))
-
-                except(AttributeError, MySQLdb.OperationalError):
-                    log.error('Unable to fetch data!')
-                    print AttributeError.message
-                    print 'Error: unable to fetch data'
-                else:
-                    if playcount is None:
-                        log.info('Lookup successful, but playcount was not found.')
-                    else:
-                        log.info('Lookup successful, playcount = ' + playcount)
-
-            else:
-                log.warning('ProgramId was not found, playcount could not be determined for: ' + title)
-                continue
-
-        # parse show name for file system safe name
-        title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
-        title_safe = re.sub(' +', '_', title_safe)
-
-        # form the file name
-        episode_name = title_safe + " - " + season + "x" + episode + " - " + base_file_name
         # if it's a special...
         if season.zfill(2) == "00" and episode == "00":
             # episode_name = episode_name + " - " + air_date
@@ -870,10 +541,16 @@ def read_recordings():
         else:
             episode_count += 1
 
+        # parse show name for file system safe name
+        #title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
+        #title_safe = re.sub(' +', ' ', title_safe)
+
+        # form the file name
+        episode_name = ttvdb_title + " - S" + season + "E" + episode + " - " + subtitle
+
         # set target link dir
-        target_link_dir = os.path.join(config.destination_dir, title_safe)
+        target_link_dir = os.path.join(config.destination_dir, ttvdb_title)
         link_file = os.path.join(target_link_dir, episode_name) + file_extension
-        # print 'LINK FILE = ' + link_file
 
         # check if we're running comskip on just one recording
         if args.comskip is not None:
@@ -883,16 +560,14 @@ def read_recordings():
                 break
 
         # update series library and count
-        if not series_lib or title_safe not in series_lib:
-            series_lib.append(title_safe)
+        if not series_lib or ttvdb_title not in series_lib:
+            series_lib.append(ttvdb_title)
 
-        # skip if link already exists (unless we're updating nfo files)
+        # skip if link already exists
         if os.path.exists(link_file) or os.path.islink(link_file):
-            if args.show_status is False and args.refresh_nfos is False:
-                print 'Link already exists: ' + link_file
-                log.info('Link already exists: ' + link_file)
-                if args.add is not None and args.refresh_nfos is False:
-                    continue
+            print 'Link already exists: ' + link_file
+            log.info('Link already exists: ' + link_file)
+            continue
 
         # find source directory, and if not found, skip it because it's an orphaned recording!
         # (skip this if we are reading from an xml file)
@@ -910,56 +585,30 @@ def read_recordings():
                 log.error('Cannot create link for ' + episode_name + ', no valid source directory.  Skipping.')
                 continue
 
-        # this is a new recording (or we're just refreshing nfo files), so check if we're just checking the status for now
+        # this is a new recording, so check if we're just checking the status for now
         if args.show_status is True and is_special is True:
             if not os.path.exists(link_file):
                 special_new_lib.append(link_file)
-            # print str(special_count) + ' ' + source_file
             continue
 
-        # if this is a new series, then make a new directory for it
-        # of if a directory exists, but a tvshow.nfo file is not found
-        if args.refresh_nfos is False:
-            if not os.path.exists(target_link_dir) or (
-                        os.path.exists(target_link_dir) and not (
-                            os.path.exists(os.path.join(target_link_dir, 'tvshow.nfo')))):
-                if not os.path.exists(target_link_dir) and args.show_status is False:
-                    os.makedirs(target_link_dir)
-                # series_new_count += 1
-                if not target_link_dir in series_new_lib:
-                    series_new_lib.append(target_link_dir)
+        #series_title = get_title_from_ttvdb(inetref)
 
-                # branch on inetref type
-                if args.show_status is False:
-                    result = False
-                    generic_inetref = ('ttvdb' not in inetref and 'tmdb' not in inetref)
-                    if generic_inetref is True:
-                        log.warning('Inetref provided is neither TTVDB or TMDB... trying each to find a match...')
+        #title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', series_title)
+        #title_safe = re.sub(' +', ' ', title_safe)
 
-                    if 'ttvdb' in inetref or generic_inetref is True:
-                        if 'ttvdb' in inetref:
-                            print 'Adding new series from TTVDB: ' + title
-                            log.info('Adding new series from TTVDB: ' + title)
-                        else:
-                            log.info('Trying to find TTVDB series from generic inetref')
-                        result = new_series_from_ttvdb(title, title_safe, inetref, category,
-                                                       target_link_dir)
-                    if ('tmdb' in inetref or generic_inetref is True) and result is False:
-                        if 'tmdb' in inetref:
-                            print 'Adding new series from TMDB: ' + title
-                            log.info('Adding new series from TMDB: ' + title)
-                        else:
-                            log.info('Trying to find TMDB series from generic inetref')
-                        result = new_series_from_tmdb(title, inetref, category, target_link_dir)
+        target_link_dir = os.path.join(config.destination_dir, ttvdb_title)
 
-                    # print "RESULT: " + result
-                    if result is False:
-                        image_error_list.append(link_file)
-                        # print 'ERROR processing image for link_file: ' + link_file
-                        log.warning(
-                            'Could find series from either TTVDB or TMDB. A tvshow.nfo may not be created if other episodes in the same series are also not found.')
-                        log.warning('Link file is: ' + link_file)
-                        # continue
+        #if not os.path.exists(target_link_dir) or (os.path.exists(target_link_dir) and not (os.path.exists(os.path.join(target_link_dir, 'tvshow.nfo')))):
+        if not os.path.exists(target_link_dir):
+            os.makedirs(target_link_dir)
+
+                #result = new_series_from_ttvdb(title, ttvdb_title, inetref, category, target_link_dir)
+                #print "RESULT: " + result
+
+
+        #target_link_dir = os.path.join(config.destination_dir, ttvdb_title)
+        episode_name = ttvdb_title + " - S" + season + "E" + episode + " - " + subtitle
+        link_file = os.path.join(target_link_dir, episode_name) + file_extension
 
         # create link
         # print "Linking " + source_file + " ==> " + link_file
@@ -970,17 +619,6 @@ def read_recordings():
                     os.symlink(source_file, link_file)
                 elif config.target_type == "hardlink":
                     os.link(source_file, link_file)
-
-        # write the episode nfo
-        if args.show_status is False or args.refresh_nfos is True:
-            nfo_file = os.path.splitext(link_file)[0] + '.nfo'
-            if args.refresh_nfos is True and os.path.exists(nfo_file):
-                updated_nfos_lib.append(source_file)
-            if os.path.exists(target_link_dir):
-                write_episode_nfo(title, season, episode, plot, air_date, playcount, nfo_file)
-            if args.refresh_nfos is True:
-                continue
-
         # commercial skipping didn't work reliably using frames markers from the mythtv database as of .27
         # keep the code here anyway for later reference
         # write_comskip(path, mark_dict)
@@ -1076,12 +714,11 @@ def read_recordings():
         return True
 
 
-try:
+#try:
+def main():
     success = True
     initialize_logging()
-    if args.clean is True:
-        clean()
-    elif args.print_config is True:
+    if args.print_config is True:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
@@ -1096,9 +733,132 @@ try:
             close_db()
             sys.exit(0)
     sys.exit(0)
-except Exception, e:
-    close_db()
-    print('Line number: ' + str(sys.exc_traceback.tb_lineno))
-    print('Exception message: ' + str(e))
-    print('Traceback: ' + sys.exc_info()[0])
-    sys.exit(1)
+
+if __name__ == '__main__':
+    main()
+
+#except: # catch *all* exceptions
+   #e = sys.exc_info()[0]
+   #print( "<p>Error: %s</p>" % e )
+#except Exception, e:
+    #close_db()
+    #print('Line number: ' + str(sys.exc_traceback.tb_lineno))
+    #print('Exception message: ' + str(e))
+    #print('Traceback: ' + sys.exc_info()[0])
+    #sys.exit(1)
+
+
+
+
+
+def new_series_from_tmdb(title, inetref, category, directory):
+    """
+    create a new show from a tmdb id
+    :param title:
+    :param inetref:
+    :param category:
+    :param directory:
+    :return: True: success, False: error
+    """
+    global log
+    api_url = 'http://api.themoviedb.org/3'
+    headers = {'Accept': 'application/json'}
+
+    request = urllib2.Request('{url}/configuration?api_key={key}'.format(url=api_url, key=config.tmdb_key),
+                              headers=headers)
+    cr = json.loads(urllib2.urlopen(request).read())
+
+    # base url
+    base_url = cr['images']['base_url']
+    poster_sizes = cr['images']['poster_sizes']
+    backdrop_sizes = cr['images']['backdrop_sizes']
+    """
+        'sizes' should be sorted in ascending order, so
+            max_size = sizes[-1]
+        should get the largest size as well.
+    """
+
+    def size_str_to_int(x):
+        return float("inf") if x == 'original' else int(x[1:])
+
+    # max_size
+    max_poster_size = str(max(poster_sizes, key=size_str_to_int))
+    max_backdrop_size = str(max(backdrop_sizes, key=size_str_to_int))
+
+    series_id = get_series_id(inetref)
+    request = urllib2.Request('{url}/movie/{id}?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
+    mr = json.loads(urllib2.urlopen(request).read())
+
+    # #### POSTER #####
+    log.info('Getting path to poster...')
+    poster_path = mr['poster_path']
+    poster_url = '{0}{1}{2}'.format(base_url, max_poster_size, poster_path)
+    if poster_path is None:
+        return False
+    poster_target = os.path.join(directory, 'poster.jpg')
+    log.info('Downloading poster...')
+    if download_file(poster_url, poster_target) is False:
+        return False
+
+    # #### FANART #####
+    log.info('Getting path to fanart...')
+    backdrop_path = mr['backdrop_path']
+    backdrop_url = '{0}{1}{2}'.format(base_url, max_backdrop_size, backdrop_path)
+    if backdrop_path is None:
+        return False
+    backdrop_target = os.path.join(directory, 'fanart.jpg')
+    log.info('Downloading fanart...')
+    if download_file(backdrop_url, backdrop_target) is False:
+        return False
+
+    # print '    poster_path: ' + poster_path
+    # print '    backdrop_path: ' + backdrop_path
+
+    # request = Request('{url}/movie/{id}/images?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
+    # ir = json.loads(urlopen(request).read())
+
+    # #### BANNER #####
+    # make a 758 x 140 banner from poster
+    log.info('Making 758 x 140 banner image from poster...')
+    response = download_file(poster_url, '', True)
+    if response is None or response is False:
+        return False
+    img = Image.open(cStringIO.StringIO(response.read()))
+    # print 'w: ' + img.size[0] + ' h: ' + img.size[1]
+    banner_ratio = 758 / float(140)
+    # shift crop down by 200 pixels
+    box = (0, 220, img.size[0], int(round((img.size[0] / banner_ratio))) + 220)
+    img = img.crop(box).resize((758, 140), Image.ANTIALIAS)
+    banner_file = os.path.join(directory, 'banner.jpg')
+    log.info('Saving banner image file to ' + banner_file)
+    img.save(banner_file)
+
+    # print mr
+    # print mr['title']
+    # print mr['runtime']
+
+    rating = unicode(mr['vote_average'])
+    votes = unicode(mr['vote_count'])
+    plot = unicode(mr['overview'])
+    id = unicode(mr['id'])
+    premiered = unicode(mr['release_date'])
+    studio = ''
+    date_added = ''
+
+    # assemble genre string
+    # print mr['genres']
+    genres = mr['genres']
+    if genres is not None:
+        genre_list = ''
+        for genre in genres:
+            name = genre['name']
+            if name is not None:
+                if not name.lower() == category.lower():
+                    genre_list += name + '|'
+        if category is not None:
+            genre_list += category
+        genre_list = genre_list.strip('|')
+
+    return True
+
+
