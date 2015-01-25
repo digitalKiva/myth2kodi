@@ -386,12 +386,6 @@ def read_recordings():
 
     """
     global log
-    series_lib = []
-    series_new_lib = []
-    episode_count = 0
-    episode_new_lib = []
-    special_count = 0
-    special_new_lib = []
 
     recording_list = get_recording_list()
 
@@ -487,9 +481,6 @@ def read_recordings():
             # episode_name = episode_name + " - " + air_date
             # air_date = record_date  # might be needed so specials get sorted with recognized episodes
             is_special = True
-            special_count += 1
-        else:
-            episode_count += 1
 
         # form the file name
         episode_name = ttvdb_title + " - S" + season + "E" + episode + " - " + subtitle
@@ -505,13 +496,9 @@ def read_recordings():
                 comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
                 break
 
-        # update series library and count
-        if not series_lib or ttvdb_title not in series_lib:
-            series_lib.append(ttvdb_title)
-
         # skip if link already exists
         if os.path.exists(link_file) or os.path.islink(link_file):
-            log.info('Link already exists: ' + link_file)
+            log.info('Skipping because link already exists: ' + link_file)
             continue
 
         # find source directory, and if not found, skip it because it's an orphaned recording!
@@ -529,12 +516,6 @@ def read_recordings():
                 log.error('Cannot create link for ' + episode_name + ', no valid source directory.  Skipping.')
                 continue
 
-        # this is a new recording, so check if we're just checking the status for now
-        if args.show_status is True and is_special is True:
-            if not os.path.exists(link_file):
-                special_new_lib.append(link_file)
-            continue
-
         target_link_dir = os.path.join(config.destination_dir, ttvdb_title)
 
         if not os.path.exists(target_link_dir):
@@ -548,22 +529,13 @@ def read_recordings():
         if args.show_status is False and args.import_recording_list is None:
             if not os.path.exists(link_file) or not os.path.islink(link_file):
                 log.info('Linking ' + source_file + ' ==> ' + link_file)
-                #if config.target_type == "symlink":
-                    #os.symlink(source_file, link_file)
-                #elif config.target_type == "hardlink":
-                    #os.link(source_file, link_file)
+                if config.target_type == "symlink":
+                    os.symlink(source_file, link_file)
+                elif config.target_type == "hardlink":
+                    os.link(source_file, link_file)
         # commercial skipping didn't work reliably using frames markers from the mythtv database as of .27
         # keep the code here anyway for later reference
         # write_comskip(path, mark_dict)
-
-        # count new episode or special
-        if not os.path.exists(link_file):
-            if is_special is True:
-                special_new_lib.append(link_file)
-                # special_new_count += 1
-            else:
-                # episode_new_count += 1
-                episode_new_lib.append(link_file)
 
         # if adding a new recording with --add, comskip it, and then stop looking
         if args.add is not None and args.show_status is False:
@@ -571,47 +543,6 @@ def read_recordings():
                 # using comskip for commercial detection: http://www.kaashoek.com/comskip/
                 comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
             break
-
-    if args.add is None and args.show_status is True:
-        print '   --------------------------------'
-        print '   |         |  Series:   ' + str(len(series_lib))
-        print '   |  Total  |  Episodes: ' + str(episode_count)
-        print '   |         |  Specials: ' + str(special_count)
-        print '   |-------------------------------'
-        print '   |         |  Series:   ' + str(len(series_new_lib))
-        print '   |   New   |  Episodes: ' + str(len(episode_new_lib))
-        print '   |         |  Specials: ' + str(len(special_new_lib))
-        print '   --------------------------------'
-
-    if args.show_status is True:
-        if len(series_new_lib) > 0 or len(episode_new_lib) > 0 or len(special_new_lib) > 0:
-            print ''
-            print '   THESE LINKS ARE NOT YET CREATED:'
-            print '   ----------------------------------'
-            if len(series_new_lib) > 0:
-                print '   New Series:'
-                count = 1
-                for s in series_new_lib:
-                    print '   ' + str(count) + ' - ' + s
-                    count += 1
-                print ''
-            if len(episode_new_lib) > 0:
-                print '   New Episodes:'
-                count = 1
-                for s in episode_new_lib:
-                    print '   ' + str(count) + ' - ' + s
-                    count += 1
-                print ''
-            if len(special_new_lib) > 0:
-                print '   New Specials:'
-                count = 1
-                for s in special_new_lib:
-                    print '   ' + str(count) + ' - ' + s
-                    count += 1
-                print ''
-        else:
-            print ''
-            print '   No new recordings were found.'
 
     encountered_other_error = ('ERROR' in log_content)
     if encountered_other_error is True:
@@ -622,8 +553,6 @@ def read_recordings():
     else:
         return True
 
-
-#try:
 def main():
     success = True
     initialize_logging()
@@ -644,17 +573,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-#except: # catch *all* exceptions
-   #e = sys.exc_info()[0]
-   #print( "<p>Error: %s</p>" % e )
-#except Exception, e:
-    #print('Line number: ' + str(sys.exc_traceback.tb_lineno))
-    #print('Exception message: ' + str(e))
-    #print('Traceback: ' + sys.exc_info()[0])
-    #sys.exit(1)
-
-
 
 
 
